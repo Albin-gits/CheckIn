@@ -20,8 +20,9 @@ import '../modules/student/views/student_profile_view.dart';
 import '../modules/student/views/student_attendance_view.dart';
 import '../modules/student/views/student_timetable_view.dart';
 import '../modules/student/views/leave_request_view.dart';
-import '../modules/teacher/views/teacher_view.dart';
 import '../modules/student/views/student_view.dart';
+import '../modules/student/bindings/student_binding.dart';
+import '../modules/teacher/views/teacher_view.dart';
 import '../modules/teacher/views/attendance_view.dart';
 import '../modules/teacher/bindings/attendance_binding.dart';
 import '../modules/teacher/bindings/attendance_history_binding.dart';
@@ -105,7 +106,11 @@ class AppPages {
     GetPage(name: Routes.HOD_SETTINGS, page: () => const HodSettingsView()),
 
     // 🎓 Student Dashboard
-    GetPage(name: Routes.STUDENT, page: () => const StudentView()),
+    GetPage(
+      name: Routes.STUDENT,
+      page: () => const StudentView(),
+      binding: StudentBinding(),
+    ),
 
     // 👤 Student Profile
     GetPage(
