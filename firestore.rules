@@ -1,0 +1,221 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // USERS
+    match /users/{userId} {
+      // Users can read their own document
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      // Admins can read all user data
+      allow read: if request.auth != null && isAdmin();
+
+      // Allow newly created users to create their OWN profile document
+      // This is needed because createUserWithEmailAndPassword auto-signs in as new user
+      // Validate required fields exist and have correct types
+      allow create: if request.auth != null && 
+        request.auth.uid == userId &&
+        request.resource.data.keys().hasAll(['name', 'email', 'role', 'isActive']) &&
+        request.resource.data.name is string &&
+        request.resource.data.email is string &&
+        request.resource.data.role in ['admin', 'hod', 'teacher', 'student'] &&
+        request.resource.data.isActive is bool;
+
+      // Admins can update existing users
+      // Validate that required fields are maintained
+      allow update: if request.auth != null && 
+        isAdmin() &&
+        request.resource.data.name is string &&
+        request.resource.data.role in ['admin', 'hod', 'teacher', 'student'] &&
+        request.resource.data.isActive is bool;
+
+      // HODs can read/write users in their department
+      allow read, write: if request.auth != null && isHOD();
+
+      // Teachers can read student data
+      allow read: if request.auth != null && isTeacher() && resource.data.role == 'student';
+    }
+
+    // DEPARTMENTS
+    match /departments/{departmentId} {
+      allow read, write: if request.auth != null && (isAdmin() || isHOD());
+    }
+
+    // CLASSES
+    match /classes/{classId} {
+      // Allow admins and HODs to read/write all classes
+      // Teachers can read all classes (needed for marking attendance)
+      // Students can only read their own class
+      allow read: if request.auth != null &&
+          (isAdmin() || isHOD() || isTeacher() || isStudentInClass(classId));
+      
+      allow write: if request.auth != null && (isAdmin() || isHOD());
+    }
+
+    // PERMANENT TIMETABLE (Mon-Fri)
+    // New structure: timetable/{departmentId}/{classId}/{day}/slots/{period}
+    match /timetable/{departmentId}/{classId}/{day}/slots/{period} {
+      allow read: if request.auth != null &&
+        (isAdmin() ||
+          (isHOD() && isHODOfDepartment(departmentId)) ||
+          (isTeacher() &&
+            (resource.data.teacherUid == request.auth.uid ||
+              (resource.data.overrideEnabled == true &&
+               resource.data.overrideTeacherUid == request.auth.uid))) ||
+          (isStudent() && isStudentInClass(classId)));
+
+      allow create, update, delete: if request.auth != null &&
+        (isAdmin() || (isHOD() && isHODOfDepartment(departmentId)));
+    }
+
+    // ATTENDANCE: attendance/{classId}/{date}/{period}
+    match /attendance/{classId} {
+      // Allow reading class document (needed for listing)
+      allow read: if request.auth != null && (isAdmin() || isHOD() || teacherHasClass(classId) || isStudentInClass(classId));
+
+      // Allow reading and writing period documents
+      match /{date}/{period} {
+        allow read: if request.auth != null &&
+          (isAdmin() || isHOD() || teacherHasClass(classId) || isStudentInClass(classId));
+
+        // Create: assigned teacher (or override) OR faculty advisor can mark attendance
+        allow create: if request.auth != null &&
+          (isAdmin() || isHOD() || 
+           isTeacherAssignedToTimetable(classId, period) ||
+           isFacultyAdvisorOfClass(classId));
+
+        // Update/Delete: only the teacher who originally marked it OR the class faculty advisor.
+        allow update, delete: if request.auth != null &&
+          (isAdmin() || isHOD() ||
+            request.auth.uid == resource.data.markedByUid ||
+            isFacultyAdvisorOfClass(classId));
+      }
+    }
+
+    // SETTINGS
+    match /settings/{document} {
+      allow read, write: if request.auth != null && isAdmin();
+    }
+
+    // HOLIDAYS
+    match /holidays/{holidayId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && isAdmin();
+    }
+
+    // LEAVE REQUESTS
+    match /leaveRequests/{leaveId} {
+      // Students can read their own leave requests
+      allow read: if request.auth != null && 
+        (isAdmin() ||
+         (isStudent() && resource.data.studentId == request.auth.uid) ||
+         (isHOD() && isHODOfDepartment(resource.data.departmentId)) ||
+         (isTeacher() && isFacultyAdvisorOfClass(resource.data.classId)));
+
+      // Students can create leave requests
+      allow create: if request.auth != null &&
+        isStudent() &&
+        request.resource.data.studentId == request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.reviewedByUid == '' &&
+        request.resource.data.reviewerRole == '' &&
+        request.resource.data.responseMessage == '';
+
+      // Faculty advisors can update (approve/reject) leave requests for their class
+      // HODs can update leave requests in their department
+      // Admins can update any leave request
+      allow update: if request.auth != null &&
+        (isAdmin() ||
+         (isHOD() && isHODOfDepartment(resource.data.departmentId)) ||
+         (isTeacher() && isFacultyAdvisorOfClass(resource.data.classId) &&
+          resource.data.status == 'pending' &&
+          (request.resource.data.status == 'approved' || request.resource.data.status == 'rejected') &&
+          request.resource.data.reviewedByUid == request.auth.uid));
+
+      // Students can cancel their own pending leave requests
+      allow update: if request.auth != null &&
+        isStudent() &&
+        resource.data.studentId == request.auth.uid &&
+        resource.data.status == 'pending' &&
+        request.resource.data.status == 'cancelled';
+
+      // Only admins can delete leave requests
+      allow delete: if request.auth != null && isAdmin();
+    }
+
+    // ============ HELPER FUNCTIONS ============
+
+    function isAdmin() {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isHOD() {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'hod';
+    }
+
+    function isTeacher() {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher';
+    }
+
+    function isStudent() {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'student';
+    }
+
+    function isStudentInClass(classId) {
+      return request.auth != null &&
+        isStudent() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.classId == classId;
+    }
+
+    // Check if teacher has access to specific class (from classIds array or as faculty advisor)
+    function teacherHasClass(classId) {
+      return request.auth != null &&
+        isTeacher() &&
+        (classId in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.classIds ||
+         isFacultyAdvisorOfClass(classId));
+    }
+
+    function isHODOfDepartment(departmentId) {
+      return request.auth != null &&
+        isHOD() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.departmentId == departmentId;
+    }
+
+    function isFacultyAdvisorOfClass(classId) {
+      return request.auth != null &&
+        isTeacher() &&
+        get(/databases/$(database)/documents/classes/$(classId)).data.facultyAdvisorUid == request.auth.uid;
+    }
+
+
+    function isValidDayKey(day) {
+      return day == 'mon' || day == 'tue' || day == 'wed' || day == 'thu' || day == 'fri';
+    }
+
+    function timetableSlotPath(departmentId, classId, day, period) {
+      return /databases/$(database)/documents/timetable/$(departmentId)/$(classId)/$(day)/slots/$(period);
+    }
+
+    function classDepartmentId(classId) {
+      return get(/databases/$(database)/documents/classes/$(classId)).data.departmentId;
+    }
+
+    function isTeacherAssignedToTimetable(classId, period) {
+      return request.auth != null && isTeacher() &&
+        request.resource.data.timetableDay is string &&
+        isValidDayKey(request.resource.data.timetableDay) &&
+        exists(timetableSlotPath(classDepartmentId(classId), classId, request.resource.data.timetableDay, period)) &&
+        (
+          get(timetableSlotPath(classDepartmentId(classId), classId, request.resource.data.timetableDay, period)).data.teacherUid == request.auth.uid ||
+          (
+            get(timetableSlotPath(classDepartmentId(classId), classId, request.resource.data.timetableDay, period)).data.overrideEnabled == true &&
+            get(timetableSlotPath(classDepartmentId(classId), classId, request.resource.data.timetableDay, period)).data.overrideTeacherUid == request.auth.uid
+          )
+        );
+    }
+  }
+}

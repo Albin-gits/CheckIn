@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "493013791498",
+    "project_id": "smartattendancecollege",
+    "storage_bucket": "smartattendancecollege.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:493013791498:android:0234144e6637dac76600f3",
+        "android_client_info": {
+          "package_name": "com.checkin.check_in_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "493013791498-nm4235qgkum0rp6r55u4qpd62juurvqs.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD_avFwBC96RvV_Rgk3TkzKIcGEM5VMWvQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "493013791498-nm4235qgkum0rp6r55u4qpd62juurvqs.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
